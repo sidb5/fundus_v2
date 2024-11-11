@@ -8,6 +8,7 @@ import onnxruntime as ort
 from pages.functions import create_drive_service, upload_file_to_drive
 import time
 import uuid
+from pages.config_loader import load_config
 
 class ONNXModel:
     def __init__(self, model_path):
@@ -362,7 +363,8 @@ with col1:
     conf_threshold = st.slider("Confidence Threshold", min_value=0.0, max_value=1.0, value=0.25, help="Adjust the threshold for object detection confidence.")
 
 # Specify the default folder ID for image upload
-default_folder_id = "1ZJl54Kl-kpfPY6WbbSW29YTmDxkejN1F"
+config = load_config()
+default_folder_id = config["google_drive"]["folders"]["default"]
 
 # Initialize Google Drive service once
 service = create_drive_service()
