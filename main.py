@@ -1,5 +1,4 @@
 import streamlit as st
-from PIL import Image
 
 st.set_page_config(layout="wide",
     page_title="Fundus Disease Detection", page_icon="assets/logo_small.png"
@@ -38,8 +37,8 @@ st.markdown(hide_sidebar_style, unsafe_allow_html=True)
 
 
 # --- PAGE SETUP ---
-login = st.Page(page="pages/login.py", title=" ", default=True)
-app = st.Page(page="pages/app.py", title=" ")
+login = st.Page(page="pages/login.py", title="Login", default=True)
+app = st.Page(page="pages/app.py", title="Detection")
 
 
 # --- NAVIGATION SETUP ---
