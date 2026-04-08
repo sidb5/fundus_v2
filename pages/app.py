@@ -4,11 +4,10 @@ import tempfile
 import uuid
 from pathlib import Path
 
-import cv2
 import numpy as np
 import onnxruntime as ort
 import streamlit as st
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from ultralytics import YOLO
 
 from pages.functions import create_drive_service, upload_file_to_drive
@@ -307,6 +306,55 @@ def generate_colors(num_colors):
     return {index: tuple(color) for index, color in enumerate(colors)}
 
 
+def _text_size(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont):
+    left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+    return right - left, bottom - top
+
+
+def build_annotated_image(image_path, detections, detected_classes, class_serial_mapping, class_colors):
+    image = Image.open(image_path).convert("RGB")
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+
+    for class_name, detection in detections.items():
+        x1, y1, x2, y2 = detection["bounding_box"]
+        class_id = next(idx for idx, name in detected_classes.items() if name == class_name)
+        original_class_id = next(key for key, value in class_serial_mapping.items() if value == class_id)
+        color = tuple(map(int, class_colors[original_class_id]))
+        serial_text = str(class_id)
+
+        draw.rectangle((x1, y1, x2, y2), outline=color, width=3)
+        text_width, text_height = _text_size(draw, serial_text, font)
+        label_box = (x1, max(0, y1 - text_height - 10), x1 + text_width + 10, y1)
+        draw.rectangle(label_box, fill=color)
+        draw.text((x1 + 5, max(0, y1 - text_height - 5)), serial_text, fill=(255, 255, 255), font=font)
+
+    if not detected_classes:
+        return image
+
+    legend_height = max(60, 40 * len(detected_classes) + 20)
+    legend = Image.new("RGB", (image.width, legend_height), (255, 255, 255))
+    legend_draw = ImageDraw.Draw(legend)
+    legend_draw.rectangle((0, 0, image.width - 1, legend_height - 1), outline=(0, 0, 0), width=2)
+
+    for index, (serial, class_name) in enumerate(detected_classes.items()):
+        text = f"{serial}. {class_name}"
+        class_id = next(key for key, value in class_serial_mapping.items() if value == serial)
+        color = tuple(map(int, class_colors[class_id]))
+        legend_x, legend_y = 10, 40 * (index + 1)
+        text_width, text_height = _text_size(legend_draw, text, font)
+        legend_draw.rectangle(
+            (legend_x - 5, legend_y - text_height - 5, legend_x + text_width + 5, legend_y + 3),
+            fill=color,
+        )
+        legend_draw.text((legend_x, legend_y - text_height), text, fill=(255, 255, 255), font=font)
+
+    output = Image.new("RGB", (image.width, image.height + legend.height))
+    output.paste(image, (0, 0))
+    output.paste(legend, (0, image.height))
+    return output
+
+
 def predict(image_path, det_model, cls_model, save=True, conf_threshold=0.25):
     cls_result_dict = transform_classification_result(cls_predict(image_path, cls_model))
     results = det_model.predict(
@@ -319,7 +367,6 @@ def predict(image_path, det_model, cls_model, save=True, conf_threshold=0.25):
         verbose=False,
     )
 
-    image = cv2.imread(str(image_path))
     class_names = det_model.names
     class_colors = generate_colors(len(class_names))
     detected_classes = {}
@@ -344,72 +391,17 @@ def predict(image_path, det_model, cls_model, save=True, conf_threshold=0.25):
                 "confidence": conf,
             }
 
-            if save:
-                color = tuple(map(int, class_colors[class_id]))
-                cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
-                text = str(class_number)
-                (text_width, text_height), baseline = cv2.getTextSize(
-                    text, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2
-                )
-                cv2.rectangle(
-                    image,
-                    (x1, y1 - text_height - 10),
-                    (x1 + text_width + 10, y1),
-                    color,
-                    -1,
-                )
-                cv2.putText(
-                    image,
-                    text,
-                    (x1 + 5, y1 - 5),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.9,
-                    (255, 255, 255),
-                    2,
-                )
-
     output_image_path = None
-    if save and image is not None and detected_classes:
-        legend_height = max(60, 40 * len(detected_classes) + 20)
-        legend_width = image.shape[1]
-        legend_background = np.full(
-            (legend_height, legend_width, 3),
-            (255, 255, 255),
-            dtype=np.uint8,
+    if save:
+        output_image = build_annotated_image(
+            image_path=image_path,
+            detections=result_dict,
+            detected_classes=detected_classes,
+            class_serial_mapping=class_serial_mapping,
+            class_colors=class_colors,
         )
-        cv2.rectangle(legend_background, (0, 0), (legend_width, legend_height), (0, 0, 0), 2)
-
-        for index, (serial, class_name) in enumerate(detected_classes.items()):
-            text = f"{serial}. {class_name}"
-            (text_width, text_height), baseline = cv2.getTextSize(
-                text, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2
-            )
-            legend_x, legend_y = 10, 40 * (index + 1)
-            class_id = next(key for key, value in class_serial_mapping.items() if value == serial)
-            color = tuple(map(int, class_colors[class_id]))
-            cv2.rectangle(
-                legend_background,
-                (legend_x - 5, legend_y - text_height - 5),
-                (legend_x + text_width + 5, legend_y + baseline),
-                color,
-                -1,
-            )
-            cv2.putText(
-                legend_background,
-                text,
-                (legend_x, legend_y),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.9,
-                (255, 255, 255),
-                2,
-            )
-
-        output_image = np.concatenate((image, legend_background), axis=0)
         output_image_path = Path(tempfile.gettempdir()) / f"fundus_result_{uuid.uuid4().hex}.jpg"
-        cv2.imwrite(str(output_image_path), output_image)
-    elif save and image is not None:
-        output_image_path = Path(tempfile.gettempdir()) / f"fundus_result_{uuid.uuid4().hex}.jpg"
-        cv2.imwrite(str(output_image_path), image)
+        output_image.save(output_image_path)
 
     return output_image_path, result_dict, cls_result_dict
 
