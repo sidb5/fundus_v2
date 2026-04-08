@@ -1,4 +1,4 @@
-# GIOSTAR Fundus Disease Detection
+# Fundus Disease Detection
 
 Streamlit-based prototype for demonstrating a fundus image screening model that combines lesion detection and retinal disease classification in a single workflow.
 
